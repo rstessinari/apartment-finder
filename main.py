@@ -28,18 +28,18 @@ def send_email(user, pwd, recipient, subject, body):
 
 train_stations_nearby_bristol_dict = {
     # 'Severn Beach' : 'BS35 4PL',
-    # 'St Andrews Road' : 'BS11 9BT',
-    # 'Avonmouth' : 'BS11 9JB',
-    # 'Shirehampton' : 'BS11 9XB',
-    # 'Sea Mills' : 'BS9 1FF',
+    'St Andrews Road' : 'BS11 9BT',
+    'Avonmouth' : 'BS11 9JB',
+    'Shirehampton' : 'BS11 9XB',
+    'Sea Mills' : 'BS9 1FF',
     'Clifton Down' : 'BS8 2PN',
-    # 'Redland' : 'BS6 6QP',
-    # 'Montpelier' : 'BS6 5HA',
-    # 'Stapleton Road' : 'BS5 0ND',
-    # 'Lawrence Hill' : 'BS5 0AF',
-    # 'Temple Meads' : 'BS1 6QF',
-    # 'Bedminster' : 'BS3 4DN',
-    # 'Parson Street' : 'BS3 5PU'
+    'Redland' : 'BS6 6QP',
+    'Montpelier' : 'BS6 5HA',
+    'Stapleton Road' : 'BS5 0ND',
+    'Lawrence Hill' : 'BS5 0AF',
+    'Temple Meads' : 'BS1 6QF',
+    'Bedminster' : 'BS3 4DN',
+    'Parson Street' : 'BS3 5PU'
     # 'Nailsea & Backwell' : 'BS48 3LE'
 }
 
@@ -52,10 +52,10 @@ def get_distance_to_location(starting_postcode,ending_postcode):
     distance_txt = 'NaN'
     try:
         directions_result = gmaps.directions(starting_postcode, ending_postcode,
-                                             mode='bicycling',
+                                            #  mode='bicycling',
                                             #  mode='transit',
-                                            #  mode='walking'
-                                             units='imperial',
+                                             mode='walking',
+                                             units='imperial'
                                             #  units='metric',
                                             )
         distance_value = float(directions_result[0]['legs'][0]['distance']['value'])
@@ -67,6 +67,7 @@ def get_distance_to_location(starting_postcode,ending_postcode):
 
 
 def find_closest_train_station(starting_postcode):
+    from time import sleep
     min_distance_value = 99999.9 # in meters
     closest_station = ''
     closest_station_distance_in_miles = ''
@@ -78,6 +79,7 @@ def find_closest_train_station(starting_postcode):
             min_distance_value = result[0]
             closest_station = station
             closest_station_distance_in_miles = result[1]
+        sleep(0.1)
 
     # print('The closest station from',target_postcode,'is ',closest_station,'(',station_postcode,'):', closest_station_distance_in_miles)
     return (closest_station,closest_station_distance_in_miles)
@@ -353,4 +355,4 @@ if __name__ == "__main__":
         prop = Property()
         prop.set_soup(bs)
         prop.set_info()
-        prop.print_info()
+        print(prop.get_info())
