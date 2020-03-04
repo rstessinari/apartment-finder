@@ -334,17 +334,23 @@ class Property:
         print('The closest station is',self.closest_train_station_name,'. ',closest_station_distance_in_miles,'away.')
 
 
+import requests
+from bs4 import BeautifulSoup
+
 if __name__ == "__main__":
     # result = find_closest_train_station('BS3 5LY')
     # print(result[0])
     # print(result[1])
-    import requests
-    from bs4 import BeautifulSoup
-    res = requests.get('https://www.zoopla.co.uk/to-rent/details/51602204')
-    bs = BeautifulSoup(res.text, 'lxml')
-    # print(bs.prettify())
 
-    prop = Property()
-    prop.set_soup(bs)
-    prop.set_info()
-    prop.print_info()
+    id_lst = [51602204, 54439545, 47997635, 50896995]
+    for id in id_lst:
+        print()
+        print("--- prop {} ---".format(id))
+        res = requests.get('https://www.zoopla.co.uk/to-rent/details/{}'.format(id))
+        bs = BeautifulSoup(res.text, 'lxml')
+        # print(bs.prettify())
+
+        prop = Property()
+        prop.set_soup(bs)
+        prop.set_info()
+        prop.print_info()
