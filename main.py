@@ -45,7 +45,7 @@ train_stations_nearby_bristol_dict = {
 
 
 def get_distance_to_location(starting_postcode,ending_postcode):
-    my_api_key = 'AIzaSyBgSRvBvVsKl5qqEHVPdsl1aaZRJlW0-kw'
+    my_api_key = ''
     gmaps = googlemaps.Client(key=my_api_key)
 
     distance_value = -1.0
