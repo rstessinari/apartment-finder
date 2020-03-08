@@ -1,3 +1,19 @@
+
+#!/usr/bin/python3
+
+import googlemaps
+import re
+import requests
+from bs4 import BeautifulSoup
+from os import makedirs
+from os.path import exists, join
+from time import sleep
+
+
+KNOWN_PROPERTIES = '_known_properties.txt'
+RESULTS_FOLDER = 'properties'
+
+
 def send_email(user, pwd, recipient, subject, body):
     import smtplib
 
@@ -45,7 +61,7 @@ train_stations_nearby_bristol_dict = {
 
 
 def get_distance_to_location(starting_postcode,ending_postcode):
-    my_api_key = ''
+    my_api_key = open('google_api_key', 'r').read()
     gmaps = googlemaps.Client(key=my_api_key)
 
     distance_value = -1.0
@@ -67,7 +83,6 @@ def get_distance_to_location(starting_postcode,ending_postcode):
 
 
 def find_closest_train_station(starting_postcode):
-    from time import sleep
     min_distance_value = 99999.9 # in meters
     closest_station = ''
     closest_station_distance_in_miles = ''
@@ -84,8 +99,6 @@ def find_closest_train_station(starting_postcode):
     # print('The closest station from',target_postcode,'is ',closest_station,'(',station_postcode,'):', closest_station_distance_in_miles)
     return (closest_station,closest_station_distance_in_miles)
 
-import re
-import googlemaps
 
 class Property:
     prop_id = ''
@@ -104,16 +117,18 @@ class Property:
     num_baths = ''
     num_recepts = ''
     zoopla_link = ''
-    ratio = ''
+    score = ''
     closest_train_station_name = ''
     closest_train_station_distance = ''
+
+    def __init__(self, id):
+        self.prop_id = id
 
     def set_soup(self,soup):
         self.soup = soup
 
     def set_info(self):
         self.set_title()
-        self.set_id()
         self.set_postal_code()
         self.set_gmaps_link()
         self.set_route_to_lab()
@@ -121,7 +136,7 @@ class Property:
         self.set_rent()
         self.set_rooms()
         self.set_zoopla_link()
-        self.set_ratio()
+        self.set_score()
         self.set_closest_train_station()
 
     def get_info(self):
@@ -135,7 +150,7 @@ class Property:
         result = result + 'Routes to Lab link: %s\n' % self.get_route_to_lab()
         result = result + 'Zoopla Link: %s\n' % self.get_zoopla_link()
         result = result + 'The closest train station is: %s, %s away\n' % (self.get_closest_train_station(), self.get_cloest_train_station_distance())
-        result = result + 'The ratio is: %s\n' % self.get_ratio()
+        result = result + 'The score is: %s\n' % self.get_score()
         return result
 
     def print_info(self):
@@ -169,14 +184,6 @@ class Property:
     
     def print_tag(self):
         print(self.get_tag())
-    
-    def set_id(self):
-        pattern = re.compile('\"id\":\s(\d+),')
-        script = self.soup.find('script', text=pattern)
-        if script:
-            match = pattern.search(script.text)
-            if match:
-                self.prop_id = match.group(1)
     
     def get_id(self):
         return self.prop_id
@@ -300,12 +307,12 @@ class Property:
     def get_zoopla_link(self):
         return self.zoopla_link
     
-    def set_ratio(self):
-        ratio = self.distance_value/1000/1.6 * float(self.rent_pcm) / float(self.num_beds)
-        self.ratio = '%.1f' % ratio
+    def set_score(self):
+        score = self.distance_value/1000/1.6 * float(self.rent_pcm) / float(self.num_beds)
+        self.score = '%.1f' % score
     
-    def get_ratio(self):
-        return self.ratio
+    def get_score(self):
+        return self.score
     
     def print_zoopla_link(self):
         print('Zoopla Link: %s' % self.get_zoopla_link())
@@ -316,7 +323,7 @@ class Property:
         send_email('zeibzon2@gmail.com','Z7YSEw0@EufxDhl9',['rodrigostange@gmail.com','rsc.segatto@gmail.com'],title,msg)
 
     def isWorthy(self, value):
-        if float(self.get_ratio()) < (value):
+        if float(self.get_score()) < (value):
             return True
         else:
             return False
@@ -336,23 +343,161 @@ class Property:
         print('The closest station is',self.closest_train_station_name,'. ',closest_station_distance_in_miles,'away.')
 
 
-import requests
-from bs4 import BeautifulSoup
+def get_ids_from_zoopla_main_page(text):
+    matchObj = re.findall('\"id\": \"([0-9]*)\",',text)
+    return matchObj
+
+
+def create_link(city, beds_max, beds_min, pets_allowed, price_max, price_min, radius, pn):
+    link = "https://www.zoopla.co.uk/to-rent/property/{}/?beds_max={}&beds_min={}&pets_allowed={}&price_frequency=per_month&price_max={}&price_min={}&q={}&radius={}&results_sort=newest_listings&page_size=100&pn={}&search_source=facets".format(
+    city, beds_max, beds_min, pets_allowed, price_max, price_min, city, radius, pn)
+    return link
+
+
+def scavenge_zoopla(city = "Bristol", beds_max = 4, beds_min = 2, pets_allowed = True, price_max = 1400, price_min = 800, radius = 0):
+    print("Looking for properties to rent on Zoopla with the following parameters:\n\tCity: {}\n\tBedrooms: {} - {}\n\tPrice range: £{} - £{}\n\tOther: Pets? {}".format(
+          city, beds_min, beds_max, price_min, price_max, pets_allowed))
+    pn = 1
+    link = create_link(city, beds_max, beds_min, pets_allowed, price_max, price_min, radius, pn)
+    print("\tSearch link: {}".format(link), flush=True)
+    res = requests.get(link)
+    id_lst = get_ids_from_zoopla_main_page(res.text)
+
+    if "Pages:" in res.text:
+        pn = pn + 1
+        while ">Next</a>" in res.text:
+            link = create_link(city, beds_max, beds_min, pets_allowed, price_max, price_min, radius, pn)
+            print("\tNext Page: {}".format(link), flush=True)
+            res = requests.get(link)
+            id_lst = id_lst + get_ids_from_zoopla_main_page(res.text)
+            pn = pn + 1
+    
+    return list(set(id_lst))
+
+
+def analize_property(id, data_folder):
+    print("--- Analyzing property {} ---".format(id))
+    try:
+        with open(join(data_folder,"{}.html".format(id)), "r") as file:
+            data = file.read()
+            # bs = BeautifulSoup(data, 'lxml')
+            # get_ids_from_zoopla_soup(bs)
+            get_ids_from_zoopla_main_page(data)
+    except: # noqa
+        print("Cannot open id {} in folder \"{}\"".format(id, data_folder))
+
+
+def check_and_create_folder(folder):
+    if not exists(folder):
+        makedirs(folder)
+
+
+def download_data_zoopla(id_lst, data_folder, known_prop_filename):
+    check_and_create_folder(data_folder)
+    print("Saving them in {}".format(data_folder))
+
+    for id in id_lst:
+        print("--- property {} ---".format(id))
+        res = requests.get('https://www.zoopla.co.uk/to-rent/details/{}'.format(id))
+        with open(join(data_folder,"{}.html".format(id)), "w") as file:
+            file.write(res.text)
+            file.close()
+
+        # add id to known_list:
+        with open(known_prop_filename, "a") as file:
+            file.write("{};".format(id))
+            file.close()
+
+
+def test_train_station_distance(postcode):
+    result = find_closest_train_station(postcode)
+    print(result[0])
+    print(result[1])
+
+
+def test_property_list_scrapping(id_lst, data_folder):
+    for id in id_lst:
+        print("\n--- property {} ---".format(id))
+        with open(join(data_folder,"{}.html".format(id)), "r") as file:
+            data = file.read()
+            bs = BeautifulSoup(data, 'lxml')
+            prop = Property(id)
+            prop.set_soup(bs)
+            prop.set_info()
+            print(prop.get_info())
+
+
+def filter_new_ids(id_lst, known_prop_filename):
+    print("\nFiltering new properties only. Reading file \"{}\".".format(known_prop_filename), flush=True)
+    try:
+        with open(known_prop_filename, "r") as file:
+            data = file.read()
+            known_ids = data.split(';')
+            print("Found {} properties already saved.".format(len(known_ids)-1))
+    except: # noqa
+        print("Cannot open file \"{}\". No properties saved.".format(known_prop_filename))
+        known_ids = []
+
+    new_ids = list(set(id_lst) - set(known_ids))
+    print("Found {} new properties.".format(len(new_ids)))
+    return new_ids
+
+
+def analyze_properties_known(data_folder, known_prop_filename):
+    print("Retrieving known properties list from \"{}\"".format(known_prop_filename), flush=True)
+    try:
+        with open(known_prop_filename, "r") as file:
+            data = file.read()
+            known_ids = data.split(';')
+    except: # noqa
+        print("Cannot open file \"{}\". No properties can be analyzed.".format(known_prop_filename))
+        return False
+
+    print("Analyzing {} properties".format(len(known_ids)-1))
+
+    for id in known_ids:
+        if id == '':
+            continue
+
+        print("\n--- property {} ---".format(id))
+        with open(join(data_folder,"{}.html".format(id)), "r") as file:
+            data = file.read()
+            bs = BeautifulSoup(data, 'lxml')
+            prop = Property(id)
+            prop.set_soup(bs)
+            prop.set_info()
+            print(prop.get_info())
+            # preciso salvar as propriedades em algum lugar. Dataframe provavelmente
+
 
 if __name__ == "__main__":
-    # result = find_closest_train_station('BS3 5LY')
-    # print(result[0])
-    # print(result[1])
+    # test_train_station_distance('BS3 5LY')
+    # test_property_list_scrapping([49627231, 50896995], RESULTS_FOLDER)
 
-    id_lst = [51602204, 54439545, 47997635, 50896995]
-    for id in id_lst:
-        print()
-        print("--- prop {} ---".format(id))
-        res = requests.get('https://www.zoopla.co.uk/to-rent/details/{}'.format(id))
-        bs = BeautifulSoup(res.text, 'lxml')
-        # print(bs.prettify())
+    city = "Bristol"
+    beds_min = 2
+    beds_max = 3
+    pets_allowed = True
+    price_min = 800
+    price_max = 1300
+    radius = 0 # 0 means no restriction
 
-        prop = Property()
-        prop.set_soup(bs)
-        prop.set_info()
-        print(prop.get_info())
+    id_lst = scavenge_zoopla(city, beds_max, beds_min, pets_allowed, price_max, price_min, radius)
+    print("\n** Found {} properties **".format(len(id_lst)))
+
+    known_prop_filename = join(RESULTS_FOLDER, KNOWN_PROPERTIES)
+    ids_to_download = filter_new_ids(id_lst, known_prop_filename)
+
+    # # create a list of already downloaded ids.
+    # known_prop_lst = 
+
+    # downloads data from new not-saved properties
+    if ids_to_download != []:
+        download_data_zoopla(ids_to_download, RESULTS_FOLDER, known_prop_filename)
+
+    # analyse files
+    analyze_properties_known(RESULTS_FOLDER, known_prop_filename)
+
+    print("Job done.")
+
+
