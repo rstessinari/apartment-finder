@@ -2,6 +2,7 @@
 #!/usr/bin/python3
 
 import googlemaps
+import pandas as pd
 import re
 import requests
 from bs4 import BeautifulSoup
@@ -10,6 +11,7 @@ from os.path import exists, join
 from time import sleep
 
 
+ANALYZED_DATAFRAME = 'analyzed_properties.xlsx'
 KNOWN_PROPERTIES = '_known_properties.txt'
 RESULTS_FOLDER = 'properties'
 
@@ -120,6 +122,7 @@ class Property:
     score = ''
     closest_train_station_name = ''
     closest_train_station_distance = ''
+    pets_allowed = ''
 
     def __init__(self, id):
         self.prop_id = id
@@ -443,6 +446,29 @@ def filter_new_ids(id_lst, known_prop_filename):
     return new_ids
 
 
+def add_property_to_dataframe(property, df):
+    property = Property(12)
+    prop_dict = {"id": property.prop_id,
+                 "postcode": property.postalcode,
+                 "distance to lab": property.distance_value,
+                 "rent (pcm)": property.rent_pcm,
+                 "bedrooms": property.num_beds,
+                 "receptions": property.num_recepts,
+                 "bathrooms": property.num_baths,
+                 "closest train station": property.closest_train_station_distance,
+                 "score": property.score,
+                 "link gmaps": property.gmaps_link,
+                 "link routes": property.url_route_to_lab,
+                 "link ad": property.zoopla_link,
+                 "title": property.title
+                }
+    print(prop_dict)
+    df.append(prop_dict, ignore_index=True)
+    print(df, flush=True)
+    return df
+    # sys.exit()
+
+
 def analyze_properties_known(data_folder, known_prop_filename):
     print("Retrieving known properties list from \"{}\"".format(known_prop_filename), flush=True)
     try:
@@ -455,6 +481,8 @@ def analyze_properties_known(data_folder, known_prop_filename):
 
     print("Analyzing {} properties".format(len(known_ids)-1))
 
+
+    df = pd.read_excel(ANALYZED_DATAFRAME)
     for id in known_ids:
         if id == '':
             continue
@@ -467,7 +495,11 @@ def analyze_properties_known(data_folder, known_prop_filename):
             prop.set_soup(bs)
             prop.set_info()
             print(prop.get_info())
+            df = add_property_to_dataframe(prop,df)
+            print(df)
             # preciso salvar as propriedades em algum lugar. Dataframe provavelmente
+    
+    df.to_excel("output.xlsx")
 
 
 if __name__ == "__main__":
@@ -475,11 +507,11 @@ if __name__ == "__main__":
     # test_property_list_scrapping([49627231, 50896995], RESULTS_FOLDER)
 
     city = "Bristol"
-    beds_min = 2
+    beds_min = 3
     beds_max = 3
     pets_allowed = True
     price_min = 800
-    price_max = 1300
+    price_max = 1150
     radius = 0 # 0 means no restriction
 
     id_lst = scavenge_zoopla(city, beds_max, beds_min, pets_allowed, price_max, price_min, radius)
