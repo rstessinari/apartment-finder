@@ -1,105 +1,23 @@
 
 #!/usr/bin/python3
 
+from bs4 import BeautifulSoup
+from click import command, option
+from os import makedirs
+from os.path import exists, join
+from time import sleep
 import googlemaps
 import pandas as pd
 import re
 import requests
-from bs4 import BeautifulSoup
-from os import makedirs
-from os.path import exists, join
-from time import sleep
 
 
 ANALYZED_DATAFRAME = 'analyzed_properties.xlsx'
-KNOWN_PROPERTIES = '_known_properties.txt'
-RESULTS_FOLDER = 'properties'
-
-
-def send_email(user, pwd, recipient, subject, body):
-    import smtplib
-
-    FROM = user
-    TO = recipient if isinstance(recipient, list) else [recipient]
-    SUBJECT = subject
-    TEXT = body
-
-    # Prepare actual message
-    message = """From: %s\nTo: %s\nSubject: %s\n\n%s
-    """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.ehlo()
-        server.starttls()
-        server.login(user, pwd)
-        server.sendmail(FROM, TO, message)
-        server.close()
-        return 'successfully sent the mail'
-    except:
-        return 'failed to send mail'
-
-    # usage
-    # title = 'New interesting property: '
-    # msg = 'testing'
-    # send_email('zeibzon2@gmail.com','Z7YSEw0@EufxDhl9',['rodrigostange@gmail.com'],title,msg)
-
-
-train_stations_nearby_bristol_dict = {
-    # 'Severn Beach' : 'BS35 4PL',
-    'St Andrews Road' : 'BS11 9BT',
-    'Avonmouth' : 'BS11 9JB',
-    'Shirehampton' : 'BS11 9XB',
-    'Sea Mills' : 'BS9 1FF',
-    'Clifton Down' : 'BS8 2PN',
-    'Redland' : 'BS6 6QP',
-    'Montpelier' : 'BS6 5HA',
-    'Stapleton Road' : 'BS5 0ND',
-    'Lawrence Hill' : 'BS5 0AF',
-    'Temple Meads' : 'BS1 6QF',
-    'Bedminster' : 'BS3 4DN',
-    'Parson Street' : 'BS3 5PU'
-    # 'Nailsea & Backwell' : 'BS48 3LE'
-}
-
-
-def get_distance_to_location(starting_postcode,ending_postcode):
-    my_api_key = open('google_api_key', 'r').read()
-    gmaps = googlemaps.Client(key=my_api_key)
-
-    distance_value = -1.0
-    distance_txt = 'NaN'
-    try:
-        directions_result = gmaps.directions(starting_postcode, ending_postcode,
-                                            #  mode='bicycling',
-                                            #  mode='transit',
-                                             mode='walking',
-                                             units='imperial'
-                                            #  units='metric',
-                                            )
-        distance_value = float(directions_result[0]['legs'][0]['distance']['value'])
-        distance_txt = directions_result[0]['legs'][0]['distance']['text']
-    except:
-        print('It was not possible to retrieve distance from gmaps.')
-    
-    return (distance_value,distance_txt)
-
-
-def find_closest_train_station(starting_postcode):
-    min_distance_value = 99999.9 # in meters
-    closest_station = ''
-    closest_station_distance_in_miles = ''
-
-    for station in train_stations_nearby_bristol_dict:
-        station_postcode = train_stations_nearby_bristol_dict[station]
-        result = get_distance_to_location(starting_postcode,station_postcode)
-        if result[0] < min_distance_value:
-            min_distance_value = result[0]
-            closest_station = station
-            closest_station_distance_in_miles = result[1]
-        sleep(0.1)
-
-    # print('The closest station from',target_postcode,'is ',closest_station,'(',station_postcode,'):', closest_station_distance_in_miles)
-    return (closest_station,closest_station_distance_in_miles)
+FORCE_REFRESH = False
+DATA_FOLDER = 'properties'
+KNOWN_PROPERTIES = join(DATA_FOLDER, '_known_properties.txt')
+WATCH_MODE = False
+ZOOPLA_IDS_MAIN_PAGE_MATCH = '\"id\": \"([0-9]*)\",'
 
 
 class Property:
@@ -346,8 +264,94 @@ class Property:
         print('The closest station is',self.closest_train_station_name,'. ',closest_station_distance_in_miles,'away.')
 
 
+train_stations_nearby_bristol_dict = {
+    # 'Severn Beach' : 'BS35 4PL',
+    'St Andrews Road' : 'BS11 9BT',
+    'Avonmouth' : 'BS11 9JB',
+    'Shirehampton' : 'BS11 9XB',
+    'Sea Mills' : 'BS9 1FF',
+    'Clifton Down' : 'BS8 2PN',
+    'Redland' : 'BS6 6QP',
+    'Montpelier' : 'BS6 5HA',
+    'Stapleton Road' : 'BS5 0ND',
+    'Lawrence Hill' : 'BS5 0AF',
+    'Temple Meads' : 'BS1 6QF',
+    'Bedminster' : 'BS3 4DN',
+    'Parson Street' : 'BS3 5PU'
+    # 'Nailsea & Backwell' : 'BS48 3LE'
+}
+
+
+def send_email(user, pwd, recipient, subject, body):
+    import smtplib
+
+    FROM = user
+    TO = recipient if isinstance(recipient, list) else [recipient]
+    SUBJECT = subject
+    TEXT = body
+
+    # Prepare actual message
+    message = """From: %s\nTo: %s\nSubject: %s\n\n%s
+    """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.ehlo()
+        server.starttls()
+        server.login(user, pwd)
+        server.sendmail(FROM, TO, message)
+        server.close()
+        return 'successfully sent the mail'
+    except:
+        return 'failed to send mail'
+
+    # usage
+    # title = 'New interesting property: '
+    # msg = 'testing'
+    # send_email('zeibzon2@gmail.com','Z7YSEw0@EufxDhl9',['rodrigostange@gmail.com'],title,msg)
+
+
+def find_closest_train_station(starting_postcode):
+    min_distance_value = 99999.9 # in meters
+    closest_station = ''
+    closest_station_distance_in_miles = ''
+
+    for station in train_stations_nearby_bristol_dict:
+        station_postcode = train_stations_nearby_bristol_dict[station]
+        result = get_distance_to_location(starting_postcode,station_postcode)
+        if result[0] < min_distance_value:
+            min_distance_value = result[0]
+            closest_station = station
+            closest_station_distance_in_miles = result[1]
+        sleep(0.1)
+
+    # print('The closest station from',target_postcode,'is ',closest_station,'(',station_postcode,'):', closest_station_distance_in_miles)
+    return (closest_station,closest_station_distance_in_miles)
+
+
+def get_distance_to_location(starting_postcode,ending_postcode):
+    my_api_key = open('google_api_key', 'r').read()
+    gmaps = googlemaps.Client(key=my_api_key)
+
+    distance_value = -1.0
+    distance_txt = 'NaN'
+    try:
+        directions_result = gmaps.directions(starting_postcode, ending_postcode,
+                                            #  mode='bicycling',
+                                            #  mode='transit',
+                                             mode='walking',
+                                             units='imperial'
+                                            #  units='metric',
+                                            )
+        distance_value = float(directions_result[0]['legs'][0]['distance']['value'])
+        distance_txt = directions_result[0]['legs'][0]['distance']['text']
+    except:
+        print('It was not possible to retrieve distance from gmaps.')
+    
+    return (distance_value,distance_txt)
+
+
 def get_ids_from_zoopla_main_page(text):
-    matchObj = re.findall('\"id\": \"([0-9]*)\",',text)
+    matchObj = re.findall(ZOOPLA_IDS_MAIN_PAGE_MATCH, text)
     return matchObj
 
 
@@ -378,16 +382,7 @@ def scavenge_zoopla(city = "Bristol", beds_max = 4, beds_min = 2, pets_allowed =
     return list(set(id_lst))
 
 
-def analize_property(id, data_folder):
-    print("--- Analyzing property {} ---".format(id))
-    try:
-        with open(join(data_folder,"{}.html".format(id)), "r") as file:
-            data = file.read()
-            # bs = BeautifulSoup(data, 'lxml')
-            # get_ids_from_zoopla_soup(bs)
-            get_ids_from_zoopla_main_page(data)
-    except: # noqa
-        print("Cannot open id {} in folder \"{}\"".format(id, data_folder))
+
 
 
 def check_and_create_folder(folder):
@@ -395,21 +390,7 @@ def check_and_create_folder(folder):
         makedirs(folder)
 
 
-def download_data_zoopla(id_lst, data_folder, known_prop_filename):
-    check_and_create_folder(data_folder)
-    print("Saving them in {}".format(data_folder))
 
-    for id in id_lst:
-        print("--- property {} ---".format(id))
-        res = requests.get('https://www.zoopla.co.uk/to-rent/details/{}'.format(id))
-        with open(join(data_folder,"{}.html".format(id)), "w") as file:
-            file.write(res.text)
-            file.close()
-
-        # add id to known_list:
-        with open(known_prop_filename, "a") as file:
-            file.write("{};".format(id))
-            file.close()
 
 
 def test_train_station_distance(postcode):
@@ -436,6 +417,7 @@ def filter_new_ids(id_lst, known_prop_filename):
         with open(known_prop_filename, "r") as file:
             data = file.read()
             known_ids = data.split(';')
+            print(known_ids)
             print("Found {} properties already saved.".format(len(known_ids)-1))
     except: # noqa
         print("Cannot open file \"{}\". No properties saved.".format(known_prop_filename))
@@ -469,42 +451,52 @@ def add_property_to_dataframe(property, df):
     # sys.exit()
 
 
-def analyze_properties_known(data_folder, known_prop_filename):
-    print("Retrieving known properties list from \"{}\"".format(known_prop_filename), flush=True)
-    try:
-        with open(known_prop_filename, "r") as file:
-            data = file.read()
-            known_ids = data.split(';')
-    except: # noqa
-        print("Cannot open file \"{}\". No properties can be analyzed.".format(known_prop_filename))
-        return False
+# def analyze_properties_known(data_folder, known_prop_filename):
+#     print("Retrieving known properties list from \"{}\"".format(known_prop_filename), flush=True)
+#     try:
+#         with open(known_prop_filename, "r") as file:
+#             data = file.read()
+#             known_ids = data.split(';')
+#     except: # noqa
+#         print("Cannot open file \"{}\". No properties can be analyzed.".format(known_prop_filename))
+#         return False
 
-    print("Analyzing {} properties".format(len(known_ids)-1))
+#     print("Analyzing {} properties".format(len(known_ids)-1))
+#     # df = pd.read_excel(ANALYZED_DATAFRAME)
+#     for id in known_ids:
+#         if id == '':
+#             continue
+#         else:
+#             analize_property(id, data_folder)
+            # def analize_property(data_folder, id):
+            #     # print("--- Analyzing property {} ---".format(id))
+            #     # try:
+            #     #     with open(join(data_folder,"{}.html".format(id)), "r") as file:
+            #     #         data = file.read()
+            #     #         # bs = BeautifulSoup(data, 'lxml')
+            #     #         # get_ids_from_zoopla_soup(bs)
+            #     #         get_ids_from_zoopla_main_page(data)
+            #     # except: # noqa
+            #     #     print("Cannot open id {} in folder \"{}\"".format(id, data_folder))
+
+            #     print("\n--- property {} ---".format(id))
+            #     with open(join(data_folder,"{}.html".format(id)), "r") as file:
+            #         data = file.read()
+            #         bs = BeautifulSoup(data, 'lxml')
+            #         prop = Property(id)
+            #         prop.set_soup(bs)
+            #         prop.set_info()
+            #         print(prop.get_info())
+            #         # df = add_property_to_dataframe(prop,df)
+            #         # print(df)
+            #         # preciso salvar as propriedades em algum lugar. Dataframe provavelmente
+
+            #     # df.to_excel("output.xlsx")
 
 
-    df = pd.read_excel(ANALYZED_DATAFRAME)
-    for id in known_ids:
-        if id == '':
-            continue
-
-        print("\n--- property {} ---".format(id))
-        with open(join(data_folder,"{}.html".format(id)), "r") as file:
-            data = file.read()
-            bs = BeautifulSoup(data, 'lxml')
-            prop = Property(id)
-            prop.set_soup(bs)
-            prop.set_info()
-            print(prop.get_info())
-            df = add_property_to_dataframe(prop,df)
-            print(df)
-            # preciso salvar as propriedades em algum lugar. Dataframe provavelmente
-    
-    df.to_excel("output.xlsx")
-
-
-if __name__ == "__main__":
+def run(data_folder, known_prop_filename):
     # test_train_station_distance('BS3 5LY')
-    # test_property_list_scrapping([49627231, 50896995], RESULTS_FOLDER)
+    # test_property_list_scrapping([49627231, 50896995], data_folder)
 
     city = "Bristol"
     beds_min = 3
@@ -517,7 +509,6 @@ if __name__ == "__main__":
     id_lst = scavenge_zoopla(city, beds_max, beds_min, pets_allowed, price_max, price_min, radius)
     print("\n** Found {} properties **".format(len(id_lst)))
 
-    known_prop_filename = join(RESULTS_FOLDER, KNOWN_PROPERTIES)
     ids_to_download = filter_new_ids(id_lst, known_prop_filename)
 
     # # create a list of already downloaded ids.
@@ -525,11 +516,102 @@ if __name__ == "__main__":
 
     # downloads data from new not-saved properties
     if ids_to_download != []:
-        download_data_zoopla(ids_to_download, RESULTS_FOLDER, known_prop_filename)
+        download_data_zoopla(ids_to_download, data_folder, known_prop_filename)
 
     # analyse files
-    analyze_properties_known(RESULTS_FOLDER, known_prop_filename)
+    analyze_properties_known(data_folder, known_prop_filename)
 
     print("Job done.")
 
 
+    # 30704703
+
+
+def find_prop_in_database(known_prop_filename, id_lst):
+    # check list against ids in the file ^
+    # return only the non-existing
+    return id_lst
+
+
+def download_data_zoopla(data_folder, known_prop_filename, ids_to_download):
+    check_and_create_folder(data_folder)
+    print("Saving them in {}".format(data_folder))
+
+    for id in ids_to_download:
+        print("--- property {} ---".format(id))
+        res = requests.get('https://www.zoopla.co.uk/to-rent/details/{}'.format(id))
+        if res.ok:
+            with open(join(data_folder,"{}.html".format(id)), "w") as file:
+                file.write(res.text)
+                file.close()
+
+        # add id to known_list:
+        with open(known_prop_filename, "a") as file:
+            file.write("{};".format(id))
+            file.close()
+
+
+def show_properties(data_folder, id_lst):
+    for id in id_lst:
+        print("--- Analysing property {} ---".format(id))
+        try:
+            with open(join(data_folder,"{}.html".format(id)), "r") as file:
+                data = file.read()
+                bs = BeautifulSoup(data, 'lxml')
+                prop = Property(id)
+                prop.set_soup(bs)
+                prop.set_info()
+                print(prop.get_info())
+        except: # noqa
+            print("Cannot open property {} in folder \"{}\"".format(id, data_folder))
+
+
+def analise_properties(data_folder, known_prop_filename, id_lst, refresh):
+    print("Analysing {} properties".format(len(id_lst)))
+    if refresh:
+        ids_to_download = id_lst
+    else:
+        # check if id exists in the known_prop_filename. gets back only the new ones
+        ids_to_download = find_prop_in_database(known_prop_filename, id_lst)
+    
+    download_data_zoopla(data_folder, known_prop_filename, ids_to_download)
+    show_properties(data_folder, id_lst)
+
+
+@command()
+@option(
+    "-f",
+    "--find",
+    default=0,
+    help="Find one especific property from zoopla.",
+)
+@option(
+    "-r",
+    "--refresh",
+    default=FORCE_REFRESH,
+    help="If True, forces the download the property even if it already exists in the database.",
+)
+# @option(
+#     "-w",
+#     "--watch",
+#     default=WATCH_MODE,
+#     help="",
+# )
+def main(
+    find=0,
+    refresh=FORCE_REFRESH,
+):
+    """It should find a nice home for you ;)
+    """
+    data_folder = DATA_FOLDER
+    known_prop_filename = KNOWN_PROPERTIES
+    if find != 0:
+        id_lst = [find]
+        analise_properties(data_folder, known_prop_filename, id_lst, refresh)
+
+    else:
+        run(data_folder, known_prop_filename)
+
+
+if __name__ == "__main__":
+    main()
